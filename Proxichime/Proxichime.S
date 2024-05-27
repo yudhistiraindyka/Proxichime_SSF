@@ -13,19 +13,19 @@ main:
     CBI DDRB, echo_pin
 
     ; Setup serial monitor
-    CLR R24
+    CLR R27
     ; Clear UCSR0A, UBRR0H register
-    STS UCSR0A, R24   
-    STS UBRR0H, R24
+    STS UCSR0A, R27   
+    STS UBRR0H, R27
     ; Set baud rate 9600
-    LDI R24, 103      
-    STS UBRR0L, R24
+    LDI R27, 103      
+    STS UBRR0L, R27
     ; Enable RXB & TXB
-    LDI R24, 1<<RXEN0 | 1<<TXEN0  
-    STS UCSR0B, R24
+    LDI R27, 1<<RXEN0 | 1<<TXEN0  
+    STS UCSR0B, R27
     ; Asynch, even parity, 1 stop, 8 bits
-    LDI R24, 1<<UCSZ00 | 1<<UCSZ01 | 1<<UPM01
-    STS UCSR0C, R24
+    LDI R27, 1<<UCSZ00 | 1<<UCSZ01 | 1<<UPM01
+    STS UCSR0C, R27
 
 main_loop0:
     ; Get the distance measured by the HCSR04 sensor
@@ -42,6 +42,8 @@ main_loop0:
 ;========================================================================
 
 ; Get distance measurement using HCSR04 sensor
+; Arguments (0)
+; Returns (1): distance_in_cm (R25)
 calculate_distance:
     ; Send 10us high pulse to sensor
     SBI PORTB, 1
@@ -49,69 +51,78 @@ calculate_distance:
     CBI PORTB, 1      
 
     ; Timer1 normal mode
-    LDI R20, 0b00000000
-    STS TCCR1A, R20
+    LDI R27, 0b00000000
+    STS TCCR1A, R27
 
     ; Rising edge detection & prescaler=1024, noise cancellation ON
-    LDI R20, 0b11000101 
-    STS TCCR1B, R20     
+    LDI R27, 0b11000101 
+    STS TCCR1B, R27     
 
 calculate_distance_loop0:
     ; Loop until rising edge is detected
-    IN R21, TIFR1
-    SBRS R21, ICF1
+    IN R27, TIFR1
+    SBRS R27, ICF1
     RJMP calculate_distance_loop0
 
     ; Store count value at rising edge
-    LDS R16, ICR1L
+    PUSH R17
+    LDS R17, ICR1L
 
     ; Clear flag for falling edge detection
-    OUT TIFR1, R21
+    OUT TIFR1, R27
 
     ; Set for falling edge detection
-    LDI R20, 0b10000101
-    STS TCCR1B, R20
+    LDI R27, 0b10000101
+    STS TCCR1B, R27
 
 calculate_distance_loop1:
     ; Loop until falling edge is detected
-    IN R21, TIFR1
-    SBRS R21, ICF1
+    IN R27, TIFR1
+    SBRS R27, ICF1
     RJMP calculate_distance_loop1
 
     ; Store count value at falling edge
-    LDS R28, ICR1L
+    PUSH R16
+    LDS R16, ICR1L
 
-    ; Count diff R22 = R22 - R16
-    SUB R28, R16
+    ; Computer the difference
+    SUB R16, R17
 
     ; Display result to serial monitor
-    MOV   R16, R28
+    MOV R25, R16
     RCALL generate_ascii_msd
     RCALL is_lcd_buffer_ready
-    STS   UDR0, R16
+    STS   UDR0, R25
+    MOV R25, R16
     RCALL generate_ascii_lsd
     RCALL is_lcd_buffer_ready
-    STS   UDR0, R16
+    STS   UDR0, R25
 
     ; Print \n\r to serial monitor
     RCALL is_lcd_buffer_ready
-    LDI R16, 10
-    STS UDR0, R16
+    LDI R26, 10
+    STS UDR0, R26
     RCALL is_lcd_buffer_ready
-    LDI R16, 13
-    STS UDR0, R16
+    LDI R26, 13
+    STS UDR0, R26
 
     ; Clear flag for next sensor reading
-    OUT TIFR1, R21
+    OUT TIFR1, R27
+
+    MOV R25, R16
+    POP R16
+    POP R17
 
     RET
 
 ;========================================================================
 
 ; Control the light based on the distance reading
+; Arguments (1): distance_in_cm (R25)
+; Returns (0)
 light_logic:
     ; Turn on light when distance measured is < 200cm
-    CPI R28, 50
+    CPI R25, 50
     BRMI turn_on
     
     ; Else, turn off light
@@ -127,60 +138,66 @@ turn_on:
 ;========================================================================
 
 ; 10us delay via Timer0
+; Arguments (0)
+; Returns (0)
 delay_timer0:
     ; Initialize timer0 with count=0
-    CLR R20
-    OUT TCNT0, R20  
+    CLR R27
+    OUT TCNT0, R27  
 
     ; OCR0 = 20
-    LDI R20, 20
-    OUT OCR0A, R20
+    LDI R27, 20
+    OUT OCR0A, R27
 
     ; CTC mode, prescaler 8
-    LDI R20, 0b00001010
-    OUT TCCR0B, R20
+    LDI R27, 0b00001010
+    OUT TCCR0B, R27
 
 delay_timer0_loop0:
     ; Get TIFR0 byte & check
-    IN R20, TIFR0
+    IN R27, TIFR0
 
     ; If OCF0=1, skip next instruction
-    SBRS R20, OCF0A
+    SBRS R27, OCF0A
 
     ; Else, loop back & check OCF0 flag
     RJMP delay_timer0_loop0
 
     ; Stop timer0
-    CLR R20
-    OUT TCCR0B, R20
+    CLR R27
+    OUT TCCR0B, R27
 
     ; Clear OCF0 flag
-    LDI R20, (1<<OCF0A)
-    OUT TIFR0, R20
+    LDI R27, (1<<OCF0A)
+    OUT TIFR0, R27
 
     RET
 
 ;========================================================================
 
 ; Make a 200ms delay using nested loops
+; Arguments (0)
+; Returns (0)
 delay_200ms:
-    LDI R21, 255
+    LDI R27, 255
 delay_200ms_loop0: 
-    LDI R22, 255
+    LDI R26, 255
 delay_200ms_loop1:
-    LDI R23, 50
+    LDI R25, 50
 delay_200ms_loop2:
-    DEC R23
+    DEC R25
     BRNE delay_200ms_loop2
-    DEC R22
+    DEC R26
     BRNE delay_200ms_loop1
-    DEC R21
+    DEC R27
     BRNE delay_200ms_loop0
     RET
 
 ;========================================================================
 
 ; Tests data buffer if data can be sent
+; Arguments (0)
+; Returns (0)
 is_lcd_buffer_ready:
     LDS R27, UCSR0A
     SBRS R27, UDRE0
@@ -189,37 +206,48 @@ is_lcd_buffer_ready:
 
 ;========================================================================
 
-; Generates ASCII representation of R16's most significant nibble
+; Generates ASCII representation of the byte's most significant nibble
+; Arguments (1): byte_to_be_converted (R25)
+; Returns (1): converted_ascii (R25)
 generate_ascii_msd:
-    MOV R23, R16 ; save copy of result
-    ANDI R16, 0xF0 ; extract & swap high-nibble
-    SWAP R16 
-    SUBI R16, -48 ; R16 = R16 - (48) = R16 + 48
-    MOV R28, R16 ; save a copy of high-byte result
-    SUBI R28, 58 ; if +ve       
-    BRPL A_F_D1 ; branch & addz 7 to get ASCII A to F
-generate_ascii_msd_ret: RET
+    ; Extract & swap high-nibble
+    ANDI R25, 0xF0
+    SWAP R25
+
+    ; Convert to ASCII (0 to 9)
+    SUBI R25, -48
+    ; Branch if the ascii character is >9 (A to F)
+    MOV R27, R25
+    SUBI R27, 58
+    BRPL generate_ascii_msd_AtoF
+    RET
+
+generate_ascii_msd_AtoF:
+    ; Convert to ASCII (A to F)
+    SUBI R25, -7
+    RET
 
 ;========================================================================
 
-; Generates ASCII representation of R16's least significant nibble
+; Generates ASCII representation of the byte's least significant nibble
+; Arguments (1): byte_to_be_converted (R25)
+; Returns (1): converted_ascii (R25)
 generate_ascii_lsd:
-    MOV R16, R23 ; restore copy of result
-    ANDI R16, 0x0F ; extract low-nibble
-    SUBI R16, -48 ; R16 = R16 - (48) = R16 + 48
-    MOV R28, R16 ; save a copy of high-byte result
-    SUBI R28, 58 ; if +ve
-    BRPL A_F_D0 ; branch & add 7 to get ASCII A to F
-generate_ascii_lsd_ret: RET    
+    ; Extract low-nibble
+    ANDI R25, 0x0F
+
+    ; Convert to ASCII (0 to 9)
+    SUBI R25, -48
+    ; Branch if the ascii character is >9 (A to F)
+    MOV R27, R25
+    SUBI R27, 58
+    BRPL generate_ascii_lsd_AtoF
+    RET
+
+generate_ascii_lsd_AtoF:
+    SUBI R25, -7
+    RET
 
 ;========================================================================
 
-A_F_D1:
-    SUBI R16, -7 ; R16 = R16 - (7) = R16 + 7
-    RJMP generate_ascii_msd_ret
 
-;========================================================================
-
-A_F_D0:
-    SUBI R16, -7 ; R16 = R16 - (7) = R16 + 7
-    RJMP generate_ascii_lsd_ret
