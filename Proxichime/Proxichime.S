@@ -7,9 +7,25 @@
 .equ echo_pin, 0 ; PB0 as Echo pin
 
 main:
+    ; Setup input and output ports
     SBI DDRB, light_pin
     SBI DDRB, trig_pin
     CBI DDRB, echo_pin
+
+    ; Setup serial monitor
+    CLR R24
+    ; Clear UCSR0A, UBRR0H register
+    STS UCSR0A, R24   
+    STS UBRR0H, R24
+    ; Set baud rate 9600
+    LDI R24, 103      
+    STS UBRR0L, R24
+    ; Enable RXB & TXB
+    LDI R24, 1<<RXEN0 | 1<<TXEN0  
+    STS UCSR0B, R24
+    ; Asynch, even parity, 1 stop, 8 bits
+    LDI R24, 1<<UCSZ00 | 1<<UCSZ01 | 1<<UPM01
+    STS UCSR0C, R24
 
 main_loop0:
     ; Get the distance measured by the HCSR04 sensor
@@ -23,7 +39,7 @@ main_loop0:
 
     RJMP  main_loop0
 
-;===============================================================
+;========================================================================
 
 ; Get distance measurement using HCSR04 sensor
 calculate_distance:
@@ -68,17 +84,34 @@ calculate_distance_loop1:
     ; Count diff R22 = R22 - R16
     SUB R28, R16
 
+    ; Display result to serial monitor
+    MOV   R16, R28
+    RCALL generate_ascii_msd
+    RCALL is_lcd_buffer_ready
+    STS   UDR0, R16
+    RCALL generate_ascii_lsd
+    RCALL is_lcd_buffer_ready
+    STS   UDR0, R16
+
+    ; Print \n\r to serial monitor
+    RCALL is_lcd_buffer_ready
+    LDI R16, 10
+    STS UDR0, R16
+    RCALL is_lcd_buffer_ready
+    LDI R16, 13
+    STS UDR0, R16
+
     ; Clear flag for next sensor reading
     OUT TIFR1, R21
 
     RET
 
-;===============================================================
+;========================================================================
 
 ; Control the light based on the distance reading
 light_logic:
     ; Turn on light when distance measured is < 200cm
-    CPI R28, 201
+    CPI R28, 50
     BRMI turn_on
     
     ; Else, turn off light
@@ -91,7 +124,7 @@ turn_on:
 
     RET
 
-;===============================================================
+;========================================================================
 
 ; 10us delay via Timer0
 delay_timer0:
@@ -127,7 +160,7 @@ delay_timer0_loop0:
 
     RET
 
-;===============================================================
+;========================================================================
 
 ; Make a 200ms delay using nested loops
 delay_200ms:
@@ -144,3 +177,49 @@ delay_200ms_loop2:
     DEC R21
     BRNE delay_200ms_loop0
     RET
+
+;========================================================================
+
+; Tests data buffer if data can be sent
+is_lcd_buffer_ready:
+    LDS R27, UCSR0A
+    SBRS R27, UDRE0
+    RJMP is_lcd_buffer_ready
+    RET
+
+;========================================================================
+
+; Generates ASCII representation of R16's most significant nibble
+generate_ascii_msd:
+    MOV R23, R16 ; save copy of result
+    ANDI R16, 0xF0 ; extract & swap high-nibble
+    SWAP R16 
+    SUBI R16, -48 ; R16 = R16 - (48) = R16 + 48
+    MOV R28, R16 ; save a copy of high-byte result
+    SUBI R28, 58 ; if +ve       
+    BRPL A_F_D1 ; branch & addz 7 to get ASCII A to F
+generate_ascii_msd_ret: RET
+
+;========================================================================
+
+; Generates ASCII representation of R16's least significant nibble
+generate_ascii_lsd:
+    MOV R16, R23 ; restore copy of result
+    ANDI R16, 0x0F ; extract low-nibble
+    SUBI R16, -48 ; R16 = R16 - (48) = R16 + 48
+    MOV R28, R16 ; save a copy of high-byte result
+    SUBI R28, 58 ; if +ve
+    BRPL A_F_D0 ; branch & add 7 to get ASCII A to F
+generate_ascii_lsd_ret: RET    
+
+;========================================================================
+
+A_F_D1:
+    SUBI R16, -7 ; R16 = R16 - (7) = R16 + 7
+    RJMP generate_ascii_msd_ret
+
+;========================================================================
+
+A_F_D0:
+    SUBI R16, -7 ; R16 = R16 - (7) = R16 + 7
+    RJMP generate_ascii_lsd_ret
