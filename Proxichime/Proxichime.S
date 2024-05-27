@@ -3,12 +3,10 @@
 
 .global main
 
-; Define constants
-
 main:
-SBI   DDRB, 2
-SBI   DDRB, 1         ;pin PB1 as o/p (Trigger)
-CBI   DDRB, 0         ;pin PB0 as i/p (Echo)
+    SBI DDRB, 2 ;pin PB2 as bulb
+    SBI DDRB, 1 ;pin PB1 as o/p (Trigger)
+    CBI DDRB, 0 ;pin PB0 as i/p (Echo)
 
 agn:SBI   PORTB, 1
     RCALL delay_timer0
