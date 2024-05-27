@@ -2,91 +2,145 @@
 #include "avr/io.h"
 
 .global main
+.equ light_pin, 2 ; PB2 as Light bulb pin
+.equ trig_pin, 1 ; PB1 as Trigger pin
+.equ echo_pin, 0 ; PB0 as Echo pin
 
 main:
-    SBI DDRB, 2 ;pin PB2 as bulb
-    SBI DDRB, 1 ;pin PB1 as o/p (Trigger)
-    CBI DDRB, 0 ;pin PB0 as i/p (Echo)
+    SBI DDRB, light_pin
+    SBI DDRB, trig_pin
+    CBI DDRB, echo_pin
 
-agn:SBI   PORTB, 1
+main_loop0:
+    ; Get the distance measured by the HCSR04 sensor
+    RCALL calculate_distance
+
+    ; Control the light based on the distance reading
+    RCALL light_logic
+
+    ; Delay to ensure the sensor is ready
+    RCALL delay_200ms
+
+    RJMP  main_loop0
+
+;===============================================================
+
+; Get distance measurement using HCSR04 sensor
+calculate_distance:
+    ; Send 10us high pulse to sensor
+    SBI PORTB, 1
     RCALL delay_timer0
-    CBI   PORTB, 1        ;send 10us high pulse to sensor
-    ;-----------------------------------------------------------
-    RCALL echo_PW         ;compute Echo pulse width count
-    ;-----------------------------------------------------------
-    RCALL bulb_settings
-    ;-----------------------------------------------------------
-    RCALL delay_ms
-    RJMP  agn
+    CBI PORTB, 1      
 
-bulb_settings:
-        CPI   R28, 20        ;compare R28 with 20
-        BRMI  turn_on             ;jump when R28 < 20
-      CBI PORTB, 2
-      RET
+    ; Timer1 normal mode
+    LDI R20, 0b00000000
+    STS TCCR1A, R20
+
+    ; Rising edge detection & prescaler=1024, noise cancellation ON
+    LDI R20, 0b11000101 
+    STS TCCR1B, R20     
+
+calculate_distance_loop0:
+    ; Loop until rising edge is detected
+    IN R21, TIFR1
+    SBRS R21, ICF1
+    RJMP calculate_distance_loop0
+
+    ; Store count value at rising edge
+    LDS R16, ICR1L
+
+    ; Clear flag for falling edge detection
+    OUT TIFR1, R21
+
+    ; Set for falling edge detection
+    LDI R20, 0b10000101
+    STS TCCR1B, R20
+
+calculate_distance_loop1:
+    ; Loop until falling edge is detected
+    IN R21, TIFR1
+    SBRS R21, ICF1
+    RJMP calculate_distance_loop1
+
+    ; Store count value at falling edge
+    LDS R28, ICR1L
+
+    ; Count diff R22 = R22 - R16
+    SUB R28, R16
+
+    ; Clear flag for next sensor reading
+    OUT TIFR1, R21
+
+    RET
+
+;===============================================================
+
+; Control the light based on the distance reading
+light_logic:
+    ; Turn on light when distance measured is < 200cm
+    CPI R28, 201
+    BRMI turn_on
+    
+    ; Else, turn off light
+    CBI PORTB, 2
+    RET
+
 turn_on:
-      SBI PORTB, 2
+    ; Turn on light
+    SBI PORTB, 2
+
     RET
 
 ;===============================================================
-echo_PW:
-;-------
-    LDI   R20, 0b00000000
-    STS   TCCR1A, R20     ;Timer 1 normal mode
-    LDI   R20, 0b11000101 ;set for rising edge detection &
-    STS   TCCR1B, R20     ;prescaler=1024, noise cancellation ON
-    ;-----------------------------------------------------------
-l1: IN    R21, TIFR1
-    SBRS  R21, ICF1
-    RJMP  l1              ;loop until rising edge is detected
-    ;-----------------------------------------------------------
-    LDS   R16, ICR1L      ;store count value at rising edge
-    ;-----------------------------------------------------------
-    OUT   TIFR1, R21      ;clear flag for falling edge detection
-    LDI   R20, 0b10000101
-    STS   TCCR1B, R20     ;set for falling edge detection
-    ;-----------------------------------------------------------
-l2: IN    R21, TIFR1
-    SBRS  R21, ICF1
-    RJMP  l2              ;loop until falling edge is detected
-    ;-----------------------------------------------------------
-    LDS   R28, ICR1L      ;store count value at falling edge
-    ;-----------------------------------------------------------
-    SUB   R28, R16        ;count diff R22 = R22 - R16
-    OUT   TIFR1, R21      ;clear flag for next sensor reading
+
+; 10us delay via Timer0
+delay_timer0:
+    ; Initialize timer0 with count=0
+    CLR R20
+    OUT TCNT0, R20  
+
+    ; OCR0 = 20
+    LDI R20, 20
+    OUT OCR0A, R20
+
+    ; CTC mode, prescaler 8
+    LDI R20, 0b00001010
+    OUT TCCR0B, R20
+
+delay_timer0_loop0:
+    ; Get TIFR0 byte & check
+    IN R20, TIFR0
+
+    ; If OCF0=1, skip next instruction
+    SBRS R20, OCF0A
+
+    ; Else, loop back & check OCF0 flag
+    RJMP delay_timer0_loop0
+
+    ; Stop timer0
+    CLR R20
+    OUT TCCR0B, R20
+
+    ; Clear OCF0 flag
+    LDI R20, (1<<OCF0A)
+    OUT TIFR0, R20
+
     RET
-;===============================================================
 
 ;===============================================================
-delay_timer0:             ;10 usec delay via Timer 0
-;------------
-    CLR   R20
-    OUT   TCNT0, R20      ;initialize timer0 with count=0
-    LDI   R20, 20
-    OUT   OCR0A, R20      ;OCR0 = 20
-    LDI   R20, 0b00001010
-    OUT   TCCR0B, R20     ;timer0: CTC mode, prescaler 8
-    ;-----------------------------------------------------------
-l0: IN    R20, TIFR0      ;get TIFR0 byte & check
-    SBRS  R20, OCF0A      ;if OCF0=1, skip next instruction
-    RJMP  l0              ;else, loop back & check OCF0 flag
-    ;-----------------------------------------------------------
-    CLR   R20
-    OUT   TCCR0B, R20     ;stop timer0
-    ;-----------------------------------------------------------
-    LDI   R20, (1<<OCF0A)
-    OUT   TIFR0, R20      ;clear OCF0 flag
-    RET
-;===============================================================
-delay_ms:
-;--------
-    LDI   R21, 255
-l6: LDI   R22, 255
-l7: LDI   R23, 50
-l8: DEC   R23
-    BRNE  l8
-    DEC   R22
-    BRNE  l7
-    DEC   R21
-    BRNE  l6
+
+; Make a 200ms delay using nested loops
+delay_200ms:
+    LDI R21, 255
+delay_200ms_loop0: 
+    LDI R22, 255
+delay_200ms_loop1:
+    LDI R23, 50
+delay_200ms_loop2:
+    DEC R23
+    BRNE delay_200ms_loop2
+    DEC R22
+    BRNE delay_200ms_loop1
+    DEC R21
+    BRNE delay_200ms_loop0
     RET
