@@ -1,7 +1,14 @@
 #define __SFR_OFFSET 0x00
 #include "avr/io.h"
+#include "avr/interrupt.h"
 
 .global main
+.org 0x0000
+    RJMP main
+.org 0x000A
+    JMP keypad_handler
+
+.org 0x1000
 .equ light_pin, 2 ; PB2 as Light bulb pin
 .equ trig_pin, 1 ; PB1 as Trigger pin
 .equ echo_pin, 0 ; PB0 as Echo pin
@@ -12,9 +19,20 @@ main:
     SBI DDRB, trig_pin
     CBI DDRB, echo_pin
 
-    ; Setup keypad
+    ; Setup keypad:
+    ; Low nibble = input (column lines)
+    ; High nibble = output (row lines)
     LDI R27, 0xF0
-    OUT DDRD, R20
+    OUT DDRD, R27
+    ; Ground row lines
+    LDI R27, 0x0F
+    OUT PORTD, R27
+    ; Enable Pin Change Interrupt 2
+    LDI R27, 1<<PCIE2
+    STS PCICR, R27
+    ; Enable Pin Change Interrupt Mask on column lines
+    LDI R27, 0x0F
+    STS PCMSK2, R27
 
     ; Setup serial monitor
     CLR R27
@@ -30,6 +48,10 @@ main:
     ; Asynch, even parity, 1 stop, 8 bits
     LDI R27, 1<<UCSZ00 | 1<<UCSZ01 | 1<<UPM01
     STS UCSR0C, R27
+
+    ; Enable global interrupt
+    ;SEI
+
 
 main_loop0:
     ; Get the distance measured by the HCSR04 sensor
@@ -276,5 +298,20 @@ print_message_ret:
 
 ;========================================================================
 
+keypad_handler:
+    LDI ZL, lo8(msg_hello)
+    LDI ZH, hi8(msg_hello)
+    RCALL print_message
+
+    SBI PCIFR, PCIF2
+    RETI
+
+;========================================================================
+
 msg_NLCR:
     .byte 10, 13, 0
+
+msg_hello:
+    .ascii "help me i dont know"
+    .byte 10, 13, 0
+
