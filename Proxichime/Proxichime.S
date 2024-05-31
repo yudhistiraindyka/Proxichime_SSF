@@ -12,6 +12,10 @@ main:
     SBI DDRB, trig_pin
     CBI DDRB, echo_pin
 
+    ; Setup keypad
+    LDI R27, 0xF0
+    OUT DDRD, R20
+
     ; Setup serial monitor
     CLR R27
     ; Clear UCSR0A, UBRR0H register
@@ -92,19 +96,16 @@ calculate_distance_loop1:
     MOV R25, R16
     RCALL generate_ascii_msd
     RCALL is_lcd_buffer_ready
-    STS   UDR0, R25
+    STS UDR0, R25
     MOV R25, R16
     RCALL generate_ascii_lsd
     RCALL is_lcd_buffer_ready
-    STS   UDR0, R25
+    STS UDR0, R25
 
     ; Print \n\r to serial monitor
-    RCALL is_lcd_buffer_ready
-    LDI R26, 10
-    STS UDR0, R26
-    RCALL is_lcd_buffer_ready
-    LDI R26, 13
-    STS UDR0, R26
+    LDI ZL, lo8(msg_NLCR)
+    LDI ZH, hi8(msg_NLCR)
+    RCALL print_message
 
     ; Clear flag for next sensor reading
     OUT TIFR1, R27
@@ -250,4 +251,30 @@ generate_ascii_lsd_AtoF:
 
 ;========================================================================
 
+; Prints a zero-terminated string to serial monitor
+; Arguments (1): string_address (Z)
+; Returns (0)
+print_message:
+    PUSH R17
 
+print_message_loop:
+    ; When encountering a zero, return
+    LPM R17, Z+
+    CPI R17, 0
+    BREQ print_message_ret
+
+    ; Print current character
+    RCALL is_lcd_buffer_ready
+    STS UDR0, R17
+
+    ; Go to next character
+    RJMP print_message_loop
+
+print_message_ret:
+    POP R17
+    RET
+
+;========================================================================
+
+msg_NLCR:
+    .byte 10, 13, 0
